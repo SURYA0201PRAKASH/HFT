@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Live Order Book Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>
+  body {
+    background-color: #0e1111;
+    color: #e0e0e0;
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+    text-align: center;
+    margin: 0;
+    padding: 0;
+  }
+
+  h1 {
+    color: #00ffc8;
+    margin-top: 20px;
+  }
+
+  .container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 60px;
+    margin-top: 30px;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 340px;
+    box-shadow: 0 0 10px #00ffc860;
+    border-radius: 8px;
+    overflow: hidden;
+    background-color: #1a1a1a;
+  }
+
+  th {
+    background-color: #242424;
+    color: #00ffc8;
+    padding: 10px;
+    text-align: right;
+    font-size: 16px;
+  }
+
+  td {
+    padding: 8px;
+    text-align: right;
+    font-size: 15px;
+    border-bottom: 1px solid #333;
+  }
+
+  .bid {
+    color: #00ff66;
+    font-weight: bold;
+  }
+
+  .ask {
+    color: #ff4444;
+    font-weight: bold;
+  }
+
+  .footer {
+    margin-top: 40px;
+    font-size: 13px;
+    color: #555;
+  }
+
+  .instrument-select {
+    margin-top: 10px;
+  }
+
+  select {
+    background: #1f1f1f;
+    color: #00ffc8;
+    border: 1px solid #00ffc8;
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 14px;
+  }
+</style>
+
+<script>
+async function updateBook() {
+    const instrument = document.getElementById("instrument").value;
+    const res = await fetch(`/api/orderbook/${instrument}`);
+    const data = await res.json();
+
+    const bids = data.bids;
+    const asks = data.asks;
+
+    // Populate bids
+    document.getElementById("bids").innerHTML = bids.map(
+        b => `<tr><td>${b[1].toFixed(2)}</td><td class='bid'>${b[2].toFixed(4)}</td></tr>`
+    ).join('');
+
+    // Populate asks
+    document.getElementById("asks").innerHTML = asks.map(
+        a => `<tr><td>${a[1].toFixed(2)}</td><td class='ask'>${a[2].toFixed(4)}</td></tr>`
+    ).join('');
+}
+
+// Update every second
+setInterval(updateBook, 1000);
+</script>
+</head>
+
+<body>
+  <h1>📊 Live Order Book Dashboard</h1>
+
+  <div class="instrument-select">
+    <label for="instrument">Instrument:</label>
+    <select id="instrument" onchange="updateBook()">
+      <option value="BTC-PERPETUAL">BTC-PERPETUAL</option>
+      <option value="ETH-PERPETUAL">ETH-PERPETUAL</option>
+    </select>
+  </div>
+
+  <div class="container">
+    <div>
+      <h3>🟢 Bids</h3>
+      <table>
+        <thead><tr><th>Price (USDT)</th><th>Qty</th></tr></thead>
+        <tbody id="bids"></tbody>
+      </table>
+    </div>
+
+    <div>
+      <h3>🔴 Asks</h3>
+      <table>
+        <thead><tr><th>Price (USDT)</th><th>Qty</th></tr></thead>
+        <tbody id="asks"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="footer">
+    <p>Data auto-refreshes every second | Built for HFT Prototype Debugging</p>
+  </div>
+
+  <script>updateBook();</script>
+</body>
+</html>
