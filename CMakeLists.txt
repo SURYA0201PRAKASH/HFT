@@ -58,9 +58,11 @@ endif()
 
 # ---- Target ----
 add_executable(hft_prototype
-    # src/main.cpp
-	src/test_bybit.cpp
+    src/main.cpp
+	src/bybit_client.cpp
+	#src/test_bybit.cpp
     src/bybit_ws_client.cpp
+	src/bybit_ws_feed.cpp
     src/deribit_client.cpp
     src/enhanced_deribit_client.cpp
     src/enhanced_logger.cpp

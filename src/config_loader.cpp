@@ -38,10 +38,12 @@ Config load_config(const std::string& path) {
     cfg.depth_levels = node["book"]["depth_levels"].as<int>();
     for (auto w : node["features"]["windows_ms"])
         cfg.windows_ms.push_back(w.as<int>());
-
+    if (node["exchange"]) cfg.exchange = node["exchange"].as<std::string>();
     cfg.zscore_alpha = node["features"]["zscore_alpha"].as<double>();
-    cfg.csv_path = node["recording"]["csv_path"].as<std::string>();
-    cfg.sqlite_path = node["recording"]["sqlite_path"].as<std::string>();
+
+    // ✅ Read nested recording section
+    cfg.recording.csv_path    = node["recording"]["csv_path"].as<std::string>();
+    cfg.recording.sqlite_path = node["recording"]["sqlite_path"].as<std::string>();
 
     // --- pretty summary
     std::cout << "\033[1;32m[CONFIG LOADED]\033[0m " << p << std::endl;
@@ -51,8 +53,8 @@ Config load_config(const std::string& path) {
               << "\n  Windows: ";
     for (auto w : cfg.windows_ms) std::cout << w << " ";
     std::cout << "\n  Z-score α: " << cfg.zscore_alpha
-              << "\n  CSV Path: " << cfg.csv_path
-              << "\n  SQLite Path: " << cfg.sqlite_path << std::endl;
+              << "\n  CSV Path: " << cfg.recording.csv_path
+              << "\n  SQLite Path: " << cfg.recording.sqlite_path << std::endl;
 
     return cfg;
 }

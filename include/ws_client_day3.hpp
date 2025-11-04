@@ -13,6 +13,7 @@
 #include <chrono>      // Add this
 #include "nlohmann/json.hpp"
 #include <mutex>
+#include <atomic>  // if not already present
 
 namespace beast      = boost::beast;
 namespace websocket = beast::websocket;
@@ -29,7 +30,7 @@ public:
              const std::string& port,
              const std::string& target);
 
-    virtual ~WSClient() = default;
+    virtual ~WSClient();
 
     void run();
     void send_text(const std::string& msg);
@@ -64,4 +65,5 @@ protected:
     int last_seq_number_ = 0;
     std::set<std::string> subscribed_channels_;
 	std::mutex write_mutex_;
+	std::atomic<bool> shutting_down_{false};
 };

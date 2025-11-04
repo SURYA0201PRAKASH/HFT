@@ -68,10 +68,11 @@ TickAnalytics::~TickAnalytics() {
     stop();
 }
 
-void TickAnalytics::start_pull_server(const std::string& address) {
+void TickAnalytics::start_pull_server(const std::string& address, const Config& cfg) {
 	std::filesystem::create_directories("../data");
-	recorder_ = std::make_unique<MarketDataRecorder>( // 23rd Oct 2025
-    "../data/stream_features");
+	recorder_ = std::make_unique<MarketDataRecorder>(cfg);
+	std::cout << "🧩 Recorder created, writing to "
+          << cfg.recording.sqlite_path << std::endl;
 	recorder_->start_recording();
     try {
         // ✅ Bind a ZeroMQ PULL socket to receive ticks from TickProcessor
@@ -97,7 +98,7 @@ void TickAnalytics::start_pull_server(const std::string& address) {
 
                 // ✅ Convert JSON to Tick (requires Tick::from_json to be implemented)
                 Tick tick = Tick::from_json(j);
-				/* std::cout << "🟢 [TickAnalytics] Received: "
+				/*std::cout << "🟢 [TickAnalytics] Received: "
 				<< tick.instrument
                 << " | type=" << static_cast<int>(tick.type)
                 << " | price=" << tick.price
@@ -111,7 +112,7 @@ void TickAnalytics::start_pull_server(const std::string& address) {
 				// 📝 Record to CSV/SQLite
 				if (recorder_){
 				recorder_->record(tick, vol, large);} //23rd Oct 2025
-                /* std::cout << "📈 [TickAnalytics] "
+                /*std::cout << "📈 [TickAnalytics] "
                           << tick.instrument
                           << " price=" << tick.price
                           << " vol=" << vol

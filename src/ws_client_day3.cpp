@@ -59,13 +59,19 @@ void WSClient::on_read(const beast::error_code& ec, std::size_t bytes_transferre
 
 // -------------------- Async Connect Chain --------------------
 void WSClient::run() {
-	std::cout<<"RUN:"<<std::endl;
-    resolver_.async_resolve(
-        host_,
-        port_,
-        beast::bind_front_handler(&WSClient::on_resolve, shared_from_this())
-    );
+    if (connected_) {
+        std::cout << "⚠️ [WSClient] run() called but connection already open, skipping.\n";
+        return;
+    }
+    if (shutting_down_.load()) {
+        std::cout << "⚠️ [WSClient] run() called during shutdown, skipping.\n";
+        return;
+    }
+
+    resolver_.async_resolve(host_, port_,
+        beast::bind_front_handler(&WSClient::on_resolve, shared_from_this()));
 }
+
 
 void WSClient::on_resolve(const beast::error_code& ec, tcp::resolver::results_type results) {
  	std::cout << "🔍 DNS resolution callback, ec: " << ec.message() << "\n";
@@ -137,6 +143,11 @@ void WSClient::on_ssl_handshake(const beast::error_code& ec) {
 
 // -------------------- Read --------------------
 void WSClient::do_read() {
+    if (shutting_down_.load()) {
+        std::cout << "⏹ [WSClient] Skipping do_read() during shutdown\n";
+        return;
+    }
+
     //SuPr1 std::cout << "🔍 do_read() called - setting up async read\n";
     ws_.async_read(buffer_,
         [self = shared_from_this()](beast::error_code ec, std::size_t bytes_transferred) {
@@ -145,6 +156,7 @@ void WSClient::do_read() {
         }
     );
 }
+
 
 // -------------------- Logging --------------------
 void WSClient::log_message(const std::string& raw) {
@@ -200,22 +212,35 @@ void WSClient::reconnect() {
     
     std::cout << "🔄 [RECONNECT] Initiated at: " << ms << std::endl;
     std::cout << "🔄 [RECONNECT] Current connected state: " << connected_ << std::endl;
-    
-    connected_ = false;
+
+    // Forcefully mark disconnected (but only if truly not open)
+    if (connected_) {
+        std::cout << "⚠️ [RECONNECT] Connection still active — skipping reconnect.\n";
+        return;
+    }
+
+    // Arm the timer
     reconnect_timer_.expires_after(std::chrono::seconds(3));
-    
+
     reconnect_timer_.async_wait(
         [self = shared_from_this()](boost::system::error_code ec) {
             std::cout << "🔄 [RECONNECT] Timer callback - EC: " << ec.message() << std::endl;
-            if (!ec) {
-                std::cout << "🔄 [RECONNECT] Calling run() to restart connection" << std::endl;
-                self->run();
-            } else {
+            if (ec) {
                 std::cout << "❌ [RECONNECT] Timer error: " << ec.message() << std::endl;
+                return;
             }
+
+            if (self->connected_) {
+                std::cout << "⚠️ [RECONNECT] Skipped — connection still open.\n";
+                return;
+            }
+
+            std::cout << "🔄 [RECONNECT] Restarting connection...\n";
+            self->run();
         }
     );
 }
+
 
 void WSClient::send_text(const std::string& msg) {
 //     //std::cout << "🔍 send_text() called, message length: " << msg.length() << "\n";
@@ -238,3 +263,32 @@ void WSClient::send_text(const std::string& msg) {
     );
 //     std::cout << "🔍 async_write operation started\n";
 }
+// ================= Destructor Debug =================
+WSClient::~WSClient() {
+    shutting_down_.store(true);
+    std::cout << "🧹 [WSClient] Destructor called\n";
+
+    if (ws_.is_open()) {
+        boost::beast::error_code ec;
+        ws_.close(boost::beast::websocket::close_code::normal, ec);
+        if (ec)
+            std::cerr << "⚠️ [WSClient] Close error: " << ec.message() << "\n";
+    }
+	if (connected_) {
+        beast::error_code ec;
+        ws_.close(boost::beast::websocket::close_code::normal, ec);
+        if (ec)
+            std::cerr << "⚠️ [WSClient] Close error: " << ec.message() << "\n";
+        else
+            std::cout << "🧹 [WSClient] Closed websocket cleanly\n";
+        connected_ = false;
+    }
+    boost::system::error_code ec;
+    reconnect_timer_.cancel(ec);
+    if (ec)
+        std::cerr << "⚠️ [WSClient] Timer cancel error: " << ec.message() << "\n";
+    else
+        std::cout << "⏹ [WSClient] Reconnect timer cancelled\n";
+}
+
+

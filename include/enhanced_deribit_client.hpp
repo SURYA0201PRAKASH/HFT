@@ -5,12 +5,13 @@
 #include "tick_data.hpp"
 #include "tick_processor.hpp"
 #include <memory>
+#include "exchange_interface.hpp"
 
 #ifdef ZMQ_BUILD
 #include <zmq.h>
 #endif
 
-class EnhancedDeribitClient : public DeribitClient {
+class EnhancedDeribitClient : public DeribitClient, public IExchangeClient {
 public:
     EnhancedDeribitClient(boost::asio::io_context& ioc,
                          ssl::context& ctx,
@@ -38,7 +39,9 @@ public:
     void debug_tick_processor_status();
     void check_sequence_recovery();
     void test_sequence_recovery();
-
+	void connect() override;
+    void subscribe(const std::string& symbol) override;
+	
 protected:
     void on_read(const beast::error_code& ec, std::size_t bytes_transferred) override;
     

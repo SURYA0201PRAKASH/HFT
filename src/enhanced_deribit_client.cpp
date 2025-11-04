@@ -609,4 +609,13 @@ void EnhancedDeribitClient::publish_tick_zmq(const Tick& tick) {
         //          << " | Payload Size: " << payload.size() << " bytes" << std::endl;
 }
 #endif
+// ✅ Implement IExchangeClient interface methods
+void EnhancedDeribitClient::connect() {
+    std::cout << "🔗 [Deribit] Connecting..." << std::endl;
+    this->run();   // triggers async connect chain from DeribitClient (DNS -> TLS -> WS)
+}
 
+void EnhancedDeribitClient::subscribe(const std::string& symbol) {
+    std::cout << "📡 [Deribit] Subscribing to " << symbol << std::endl;
+    this->send_subscribe();  // DeribitClient already defines this
+}
