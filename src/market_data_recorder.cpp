@@ -9,7 +9,11 @@ static double safe_value(double v) {
     return (std::isnan(v) || std::isinf(v)) ? 0.0 : v;
 }
 
-MarketDataRecorder::MarketDataRecorder(const std::string& filename_prefix) {
+// ✅ Updated constructor to take Config instead of string
+MarketDataRecorder::MarketDataRecorder(const Config& cfg) {
+    // Get filename prefix (optional)
+    std::string filename_prefix = "../data/" + cfg.exchange;
+
     auto now = std::chrono::system_clock::now();
     auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
         now.time_since_epoch()).count();
@@ -18,31 +22,37 @@ MarketDataRecorder::MarketDataRecorder(const std::string& filename_prefix) {
     signal_stream_.open(signal_filename);
     signal_stream_ << "timestamp,instrument,signal_type,imbalance,bid_price,ask_price\n";
 
-    // ✅ Add this block below
-    if (sqlite3_open("../data/stream_features.db", &db_) != SQLITE_OK) {
-    std::cerr << "❌ Cannot open SQLite database\n";
-    db_ = nullptr;
-} else {
-    // ✅ Enable WAL mode so readers and writers can coexist
-    char* errMsg = nullptr;
-    sqlite3_exec(db_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, &errMsg);
-    sqlite3_exec(db_, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, &errMsg);
-    sqlite3_exec(db_, "PRAGMA temp_store=MEMORY;", nullptr, nullptr, &errMsg);
-    sqlite3_exec(db_, "PRAGMA locking_mode=NORMAL;", nullptr, nullptr, &errMsg);
-    sqlite3_exec(db_, "PRAGMA busy_timeout=5000;", nullptr, nullptr, &errMsg);
+    // ✅ Open SQLite database from config
+    const std::string& db_path = cfg.recording.sqlite_path;
+	std::cout << "🔍 Opening SQLite database at path: " << cfg.recording.sqlite_path << std::endl;
+    if (sqlite3_open(db_path.c_str(), &db_) != SQLITE_OK) {
+        std::cerr << "❌ Cannot open SQLite database: " << db_path << "\n";
+        db_ = nullptr;
+    } else {
+        char* errMsg = nullptr;
 
-    const char* create_sql =
-        "CREATE TABLE IF NOT EXISTS ticks_live ("
-        "timestamp_ms INTEGER,"
-        "instrument TEXT,"
-        "trade_price REAL,"
-        "trade_qty REAL,"
-        "rolling_vol REAL,"
-        "is_large INTEGER);";
-    sqlite3_exec(db_, create_sql, nullptr, nullptr, nullptr);
-    std::cout << "📀 SQLite database ready (WAL mode enabled)\n";
-}
+        // ✅ Enable WAL mode (for concurrent readers/writers)
+        sqlite3_exec(db_, "PRAGMA journal_mode=WAL;", nullptr, nullptr, &errMsg);
+        sqlite3_exec(db_, "PRAGMA synchronous=NORMAL;", nullptr, nullptr, &errMsg);
+        sqlite3_exec(db_, "PRAGMA temp_store=MEMORY;", nullptr, nullptr, &errMsg);
+        sqlite3_exec(db_, "PRAGMA locking_mode=NORMAL;", nullptr, nullptr, &errMsg);
+        sqlite3_exec(db_, "PRAGMA busy_timeout=5000;", nullptr, nullptr, &errMsg);
 
+        // ✅ Ensure table exists
+        const char* create_sql = R"SQL(
+            CREATE TABLE IF NOT EXISTS ticks_live (
+                timestamp_ms INTEGER,
+                instrument TEXT,
+                trade_price REAL,
+                trade_qty REAL,
+                rolling_vol REAL,
+                is_large INTEGER
+            );
+        )SQL";
+
+        sqlite3_exec(db_, create_sql, nullptr, nullptr, nullptr);
+        std::cout << "📀 SQLite database ready (WAL mode enabled) → " << db_path << "\n";
+    }
 }
 
 
@@ -104,16 +114,25 @@ void MarketDataRecorder::record(const Tick& tick, double vol, bool large) {
 
     // ✅ SQLite insert
     if (db_) {
-        std::string sql = "INSERT INTO ticks_live (timestamp_ms, instrument, trade_price, trade_qty, rolling_vol, is_large) VALUES (" +
-                          std::to_string(timestamp) + ", '" + tick.instrument + "', " +
-                          std::to_string(safe_price) + ", " +
-                          std::to_string(safe_qty) + ", " +
-                          std::to_string(safe_vol) + ", " +
-                          std::to_string(large ? 1 : 0) + ");";
+    std::string sql =
+        "INSERT INTO ticks_live (timestamp_ms, instrument, trade_price, trade_qty, rolling_vol, is_large) VALUES (" +
+        std::to_string(timestamp) + ", '" + tick.instrument + "', " +
+        std::to_string(safe_price) + ", " +
+        std::to_string(safe_qty) + ", " +
+        std::to_string(safe_vol) + ", " +
+        std::to_string(large ? 1 : 0) + ");";
 
-        if (sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, nullptr) != SQLITE_OK) {
-            std::cerr << "❌ SQLite insert error: " << sqlite3_errmsg(db_) << std::endl;
-        }
+    char* errMsg = nullptr;
+    if (sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK) {
+        std::cerr << "❌ SQLite insert error: " << (errMsg ? errMsg : "unknown") << std::endl;
+        sqlite3_free(errMsg);
     }
+
+    // ✅ Optional: force WAL checkpoint every few inserts (for visibility)
+    static int counter = 0;
+    if (++counter % 50 == 0) {  // every 50 inserts
+        sqlite3_exec(db_, "PRAGMA wal_checkpoint(TRUNCATE);", nullptr, nullptr, nullptr);
+    }
+}
 }
 

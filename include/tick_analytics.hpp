@@ -40,7 +40,7 @@ public:
 
 #ifdef ZMQ_BUILD
     // === Asynchronous ZeroMQ Worker (Module C) ===
-    void start_pull_server(const std::string& address = "tcp://127.0.0.1:7000");
+    void start_pull_server(const std::string& address, const Config& cfg);
     void stop();
 #endif
 };

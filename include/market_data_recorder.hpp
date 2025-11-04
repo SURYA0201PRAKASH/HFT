@@ -8,10 +8,11 @@
 #include <memory>
 #include "tick_data.hpp"
 #include <sqlite3.h>
+#include "config_loader.hpp"
 
 class MarketDataRecorder {
 public:
-    MarketDataRecorder(const std::string& filename_prefix);
+    MarketDataRecorder(const Config& cfg);
     ~MarketDataRecorder();
     
     void record_signal(const std::string& instrument, const std::string& signal, 

@@ -1,0 +1,18 @@
+exchange: bybit
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+
+book:
+  depth_levels: 10
+
+features:
+  windows_ms:
+    - 500
+    - 1000
+    - 5000
+  zscore_alpha: 0.001
+
+recording:
+  csv_path: ../data/bybit_stream_features.csv
+  sqlite_path: ../data/bybit_stream_features.db

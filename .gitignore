@@ -1,0 +1,38 @@
+# Build & binaries
+build/
+cmake-build*/
+*.o
+*.a
+*.so
+*.dll
+*.exe
+
+# Python virtual environments
+venv*/
+.env/
+__pycache__/
+*.pyc
+
+# IDEs
+.vscode/
+.idea/
+
+# Local data
+data/*.db
+data/*.db-*
+data/*.csv
+data/*.parquet
+data/*.png
+data/*.xlsx
+data/*.log
+*.sqlite
+*.zip
+
+# Cache
+*.pkl
+*.npy
+*.npz
+
+# OS / temp
+.DS_Store
+Thumbs.db

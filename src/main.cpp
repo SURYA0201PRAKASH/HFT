@@ -9,6 +9,8 @@
 #include <iomanip>
 #include "trading_strategy.hpp"   // ✅ Required for TradingStrategy class
 #include "config_loader.hpp"
+#include "exchange_interface.hpp"
+#include "bybit_client.hpp"
 
 std::shared_ptr<EnhancedDeribitClient> global_client = nullptr;
 std::atomic<bool> running{true};  // Add this global running flag
@@ -127,76 +129,130 @@ void print_status_and_books() {
 }
 
 
-int main() {
-	Config cfg = load_config("configs/base.yaml"); // 23rd Oct 2025
-    try {
-        std::signal(SIGINT, signal_handler);
-        std::signal(SIGTERM, signal_handler);
-        
-        std::string client_id     = "ykCxoRwu";
-        std::string client_secret = "25wBQ-OaL-_DKbf1YLSsvzHPiLNLUx_nuKF2QYHrlgo";
-        
-        if (client_id.empty() || client_secret.empty()) {
-            std::cerr << "Error: Deribit credentials are empty\n";
+void launch_deribit(const Config& cfg) {
+    std::string client_id     = "ykCxoRwu";
+    std::string client_secret = "25wBQ-OaL-_DKbf1YLSsvzHPiLNLUx_nuKF2QYHrlgo";
+
+    boost::asio::io_context ioc;
+    ssl::context ctx(ssl::context::tlsv12_client);
+
+    std::string host = "test.deribit.com";
+    std::string port = "443";
+    std::string target = "/ws/api/v2";
+
+#ifdef ZMQ_BUILD
+    TickAnalytics analytics;
+    analytics.start_pull_server("tcp://127.0.0.1:6000",cfg);
+#endif
+
+    // --- Create Deribit client ---
+    global_client = std::make_shared<EnhancedDeribitClient>(
+        ioc, ctx, host, port, target, client_id, client_secret
+    );
+
+    global_client->get_tick_processor().set_config(cfg);
+
+#ifdef ZMQ_BUILD
+    // ZMQ setup
+    auto& manager = global_client->get_order_book_manager();
+    manager.start_publisher("tcp://127.0.0.1:6500");
+
+    TradingStrategy trade_strategy;
+    trade_strategy.start_subscriber("tcp://127.0.0.1:6500", "BTC-PERPETUAL");
+
+    global_client->get_tick_processor().start_subscriber("tcp://127.0.0.1:5555");
+    std::cout << "📡 ZMQ subscriber connected to tcp://127.0.0.1:5555\n";
+#endif
+
+    // Tick-based analytics strategy
+    TickBasedStrategy strategy;
+    global_client->get_tick_processor().register_tick_callback(
+        [&strategy](const Tick& tick) { strategy.on_tick(tick); }
+    );
+
+    // --- Start status monitor thread ---
+    std::thread status_thread(print_status_and_books);
+    status_thread.detach();
+
+    // --- Run Deribit client ---
+    global_client->run();
+    ioc.run();  // blocking; clean shutdown via signal_handler
+
+    // --- Graceful shutdown ---
+    std::cout << "\n🛑 Disconnecting Deribit...\n";
+
+    if (global_client) {
+        try {
+            global_client->stop_tick_processing();
+
+#ifdef ZMQ_BUILD
+            auto& manager = global_client->get_order_book_manager();
+            manager.stop_pull_server();
+#endif
+        } catch (const std::exception& e) {
+            std::cerr << "⚠️ Deribit stop error: " << e.what() << "\n";
+        }
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    global_client.reset();
+
+    std::cout << "✅ Deribit client stopped cleanly.\n";
+}
+
+
+
+void launch_bybit(const Config& cfg) {
+    boost::asio::io_context ioc;
+    ssl::context ctx(ssl::context::tlsv12_client);
+
+#ifdef ZMQ_BUILD
+    TickAnalytics analytics;
+    analytics.start_pull_server("tcp://127.0.0.1:6000",cfg);
+#endif
+
+    std::unique_ptr<IExchangeClient> bybit_client =
+        std::make_unique<BybitClient>(ioc, ctx);
+
+    // Subscribe all symbols from config (BTCUSDT, ETHUSDT, etc.)
+    for (const auto& sym : cfg.symbols) {
+        bybit_client->subscribe(sym);
+    }
+
+    bybit_client->connect();
+    ioc.run();
+}
+
+int main(int argc, char* argv[]) {
+    std::signal(SIGINT, signal_handler);
+    std::signal(SIGTERM, signal_handler);
+
+    std::string config_path = "configs/base_deribit.yaml";
+    if (argc > 1) {
+        std::string arg = argv[1];
+        if (arg == "bybit")
+            config_path = "configs/base_bybit.yaml";
+        else if (arg != "deribit") {
+            std::cerr << "❌ Unknown exchange: " << arg
+                      << " (use 'deribit' or 'bybit')\n";
             return 1;
         }
+    }
 
-        boost::asio::io_context ioc;
-        ssl::context ctx(ssl::context::tlsv12_client);
+    Config cfg = load_config(config_path);
+    std::cout << "🧭 Using configuration: " << config_path
+              << " | Exchange: " << cfg.exchange << std::endl;
 
-        std::string host = "test.deribit.com";
-        std::string port = "443";
-        std::string target = "/ws/api/v2";
-
-//         std::cout << "🚀 Starting Tick-by-Tick HFT System...\n";
-//         std::cout << "📊 Will display real-time tick analytics every 2 seconds\n";
-//         std::cout << "Press Ctrl+C to stop...\n";
-        #ifdef ZMQ_BUILD
-        TickAnalytics analytics;
-        analytics.start_pull_server("tcp://127.0.0.1:6000");
-        #endif
-        // Create enhanced client
-        global_client = std::make_shared<EnhancedDeribitClient>(
-            ioc, ctx, host, port, target, client_id, client_secret
-        );
-		global_client->get_tick_processor().set_config(cfg); // 23rd Oct 2025
-		#ifdef ZMQ_BUILD
-		// 🔹 Start PUB/SUB bridge between OrderBookManager → TradingStrategy
-		auto& manager = global_client->get_order_book_manager();
-        manager.start_publisher("tcp://127.0.0.1:6500");
-
-        TradingStrategy trade_strategy;
-        trade_strategy.start_subscriber("tcp://127.0.0.1:6500", "BTC-PERPETUAL");
-        #endif
-		#ifdef ZMQ_BUILD
-		// ✅ Start ZeroMQ subscriber inside TickProcessor
-		global_client->get_tick_processor().start_subscriber("tcp://127.0.0.1:5555");
-		std::cout << "📡 ZMQ subscriber connected to tcp://127.0.0.1:5555" << std::endl;
-		#endif
-        // Setup tick-based strategy
-        TickBasedStrategy strategy;
-        
-        // Register tick callback for real-time processing
-        global_client->get_tick_processor().register_tick_callback(
-            [&strategy](const Tick& tick) {
-                strategy.on_tick(tick);
-            }
-        );
-
-        // Start the enhanced status display thread
-        std::thread status_thread(print_status_and_books);
-        status_thread.detach();
-        
-        // Start the main client (tick processing starts automatically after auth)
-        global_client->run();
-        ioc.run();
-        
-//         std::cout << "👋 Application shutdown complete." << std::endl;
+    try {
+        if (cfg.exchange == "deribit")
+            launch_deribit(cfg);
+        else if (cfg.exchange == "bybit")
+            launch_bybit(cfg);
     }
     catch (const std::exception& e) {
         std::cerr << "Fatal error: " << e.what() << "\n";
         return 1;
     }
-    
+
     return 0;
 }
