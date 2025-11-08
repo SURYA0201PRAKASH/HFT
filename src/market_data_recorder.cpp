@@ -4,6 +4,7 @@
 #include <sqlite3.h>
 #include <sstream>
 #include <cmath>  // for std::isnan, std::isinf
+#include <filesystem>
 
 static double safe_value(double v) {
     return (std::isnan(v) || std::isinf(v)) ? 0.0 : v;
@@ -24,7 +25,26 @@ MarketDataRecorder::MarketDataRecorder(const Config& cfg) {
 
     // ✅ Open SQLite database from config
     const std::string& db_path = cfg.recording.sqlite_path;
-	std::cout << "🔍 Opening SQLite database at path: " << cfg.recording.sqlite_path << std::endl;
+	std::cout << "================ DEBUG: MarketDataRecorder =================" << std::endl;
+	std::cout << "Requested SQLite path: " << cfg.recording.sqlite_path << std::endl;
+
+	try {
+		std::cout << "Absolute path: " 
+              << std::filesystem::absolute(cfg.recording.sqlite_path) 
+              << std::endl;
+	} catch (const std::exception& e) {
+		std::cerr << "Filesystem error: " << e.what() << std::endl;
+	}
+
+	// Verify directory existence
+	auto parent_dir = std::filesystem::path(cfg.recording.sqlite_path).parent_path();
+	std::cout << "Parent directory: " << parent_dir 
+				<< " | Exists? " << std::filesystem::exists(parent_dir) << std::endl;
+
+	// Print current working directory
+	std::cout << "Current Working Directory: " 
+          << std::filesystem::current_path() << std::endl;
+	std::cout << "============================================================" << std::endl;
     if (sqlite3_open(db_path.c_str(), &db_) != SQLITE_OK) {
         std::cerr << "❌ Cannot open SQLite database: " << db_path << "\n";
         db_ = nullptr;
@@ -90,6 +110,16 @@ void MarketDataRecorder::stop_recording() {
 }
 
 void MarketDataRecorder::record(const Tick& tick, double vol, bool large) {
+	std::cout << "[REC] record() | inst=" << tick.instrument
+          << " | px=" << tick.price
+          << " | qty=" << tick.quantity
+          << " | type=" << (int)tick.type << std::endl;
+	if (!recording_) {
+    std::cerr << "⚠️ recording_ is false — skipping DB insert\n";
+	}
+	if (!signal_stream_.is_open()) {
+    std::cerr << "⚠️ signal_stream_ closed — skipping DB insert\n";
+	}
     if (!recording_) return;
 
     std::lock_guard<std::mutex> lock(file_mutex_);
@@ -114,25 +144,16 @@ void MarketDataRecorder::record(const Tick& tick, double vol, bool large) {
 
     // ✅ SQLite insert
     if (db_) {
-    std::string sql =
-        "INSERT INTO ticks_live (timestamp_ms, instrument, trade_price, trade_qty, rolling_vol, is_large) VALUES (" +
-        std::to_string(timestamp) + ", '" + tick.instrument + "', " +
-        std::to_string(safe_price) + ", " +
-        std::to_string(safe_qty) + ", " +
-        std::to_string(safe_vol) + ", " +
-        std::to_string(large ? 1 : 0) + ");";
+        std::string sql = "INSERT INTO ticks_live (timestamp_ms, instrument, trade_price, trade_qty, rolling_vol, is_large) VALUES (" +
+                          std::to_string(timestamp) + ", '" + tick.instrument + "', " +
+                          std::to_string(safe_price) + ", " +
+                          std::to_string(safe_qty) + ", " +
+                          std::to_string(safe_vol) + ", " +
+                          std::to_string(large ? 1 : 0) + ");";
 
-    char* errMsg = nullptr;
-    if (sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, &errMsg) != SQLITE_OK) {
-        std::cerr << "❌ SQLite insert error: " << (errMsg ? errMsg : "unknown") << std::endl;
-        sqlite3_free(errMsg);
+        if (sqlite3_exec(db_, sql.c_str(), nullptr, nullptr, nullptr) != SQLITE_OK) {
+            std::cerr << "❌ SQLite insert error: " << sqlite3_errmsg(db_) << std::endl;
+        }
     }
-
-    // ✅ Optional: force WAL checkpoint every few inserts (for visibility)
-    static int counter = 0;
-    if (++counter % 50 == 0) {  // every 50 inserts
-        sqlite3_exec(db_, "PRAGMA wal_checkpoint(TRUNCATE);", nullptr, nullptr, nullptr);
-    }
-}
 }
 

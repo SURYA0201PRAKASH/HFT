@@ -206,22 +206,27 @@ void launch_bybit(const Config& cfg) {
     boost::asio::io_context ioc;
     ssl::context ctx(ssl::context::tlsv12_client);
 
-#ifdef ZMQ_BUILD
-    TickAnalytics analytics;
-    analytics.start_pull_server("tcp://127.0.0.1:6000",cfg);
-#endif
+    // --- Create recorder using full Config (not 2 strings) ---
+    auto recorder = std::make_shared<MarketDataRecorder>(cfg);
+    std::cout << "🧩 Recorder created, writing to " 
+              << cfg.recording.sqlite_path << std::endl;
 
-    std::unique_ptr<IExchangeClient> bybit_client =
-        std::make_unique<BybitClient>(ioc, ctx);
-
-    // Subscribe all symbols from config (BTCUSDT, ETHUSDT, etc.)
+    // --- Create Bybit WS client ---
+    auto bybit_client = std::make_shared<BybitWsClient>(ioc, ctx);
+    bybit_client->set_recorder(recorder);  // attach the recorder
+	std::cout << "🧠 Recorder attached to Bybit client @ " << bybit_client.get()
+          << " (recorder=" << recorder.get() << ")" << std::endl;
+    // --- Subscribe all configured symbols ---
     for (const auto& sym : cfg.symbols) {
-        bybit_client->subscribe(sym);
+        bybit_client->subscribe();  // (later we can use sym dynamically)
     }
 
-    bybit_client->connect();
+    // --- Start connection & event loop ---
+    bybit_client->run();   // ✅ instead of connect()
     ioc.run();
 }
+
+
 
 int main(int argc, char* argv[]) {
     std::signal(SIGINT, signal_handler);

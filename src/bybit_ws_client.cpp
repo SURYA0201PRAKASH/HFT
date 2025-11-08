@@ -1,12 +1,21 @@
 #include "bybit_ws_client.hpp"
+#include "market_data_recorder.hpp"  // ← NEW
 #include <iostream>
 #include <iomanip>
 #include <sstream>
+
 
 BybitWsClient::BybitWsClient(net::io_context& ioc, ssl::context& ctx)
     : WSClient(ioc, ctx, "stream.bybit.com", "443", "/v5/public/linear")
 {
     std::cout << "🟢 [BybitWsClient::ctor] Created WS client @ " << this << std::endl;
+	std::cout << "📊 [BybitWsClient] Recorder ptr=" << recorder_ << std::endl;
+	if (recorder_) {
+            recorder_->start_recording();
+            std::cout << "📊 [BybitWsClient] Recorder started successfully.\n";
+        } else {
+            std::cerr << "⚠️ [BybitWsClient] Recorder pointer is null!\n";
+        }
 }
 
 // =============================
@@ -55,8 +64,10 @@ void BybitWsClient::on_read(const beast::error_code& ec, std::size_t bytes_trans
 
     // Add timestamp
     auto now = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    std::cout << "\n🕒 [BybitWsClient] Message received at: " << std::put_time(std::localtime(&now), "%F %T") << std::endl;
-    std::cout << "📦 Raw: " << msg.substr(0, 200) << (msg.size() > 200 ? "..." : "") << std::endl;
+    std::cout << "\n🕒 [BybitWsClient] Message received at: "
+              << std::put_time(std::localtime(&now), "%F %T") << std::endl;
+    std::cout << "📦 Raw: " << msg.substr(0, 200)
+              << (msg.size() > 200 ? "..." : "") << std::endl;
 
     try {
         auto j = nlohmann::json::parse(msg, nullptr, false);
@@ -66,34 +77,37 @@ void BybitWsClient::on_read(const beast::error_code& ec, std::size_t bytes_trans
             return;
         }
 
-        // Acknowledge control / subscription messages
+        // Handle control / subscription messages
         if (j.contains("op")) {
             std::cout << "ℹ️ [BYBIT] Control: " << j.dump() << std::endl;
         }
 
-        // Orderbook update
+        // Handle orderbook updates
         if (j.contains("topic") && j.contains("data")) {
-		std::string topic = j.value("topic", "");
-		std::string typ   = j.value("type", "");
-		long long ts      = j.value("ts", 0);
+            std::string topic = j.value("topic", "");
+            std::string typ   = j.value("type", "");
+            long long ts      = j.value("ts", 0);
 
-		std::cout << "📊 [BYBIT][" << topic << "] type=" << typ << " ts=" << ts << std::endl;
+            std::cout << "📊 [BYBIT][" << topic << "] type=" << typ
+                      << " ts=" << ts << std::endl;
 
-		// Handle both array and object
-		if (j["data"].is_array() && !j["data"].empty()) {
-			for (const auto& rec : j["data"]) {
-				parse_orderbook_object(rec);
-			}
-		} else if (j["data"].is_object()) {
-			parse_orderbook_object(j["data"]);
-		}
-	}
+            // Handle both array and object structures
+            if (j["data"].is_array() && !j["data"].empty()) {
+                for (const auto& rec : j["data"]) {
+                    parse_orderbook_object(rec, ts);   // ← now includes timestamp
+                }
+            } else if (j["data"].is_object()) {
+                parse_orderbook_object(j["data"], ts); // ← same
+            }
+        }
     } catch (const std::exception& e) {
-        std::cerr << "❌ [BybitWsClient] Exception while parsing: " << e.what() << std::endl;
+        std::cerr << "❌ [BybitWsClient] Exception while parsing: "
+                  << e.what() << std::endl;
     }
 
     do_read();
 }
+
 
 // =============================
 // Destructor
@@ -115,25 +129,64 @@ void BybitWsClient::reconnect() {
     WSClient::reconnect();
 }
 
-void BybitWsClient::parse_orderbook_object(const nlohmann::json& rec) {
+void BybitWsClient::parse_orderbook_object(const nlohmann::json& rec, long long ts) {
     try {
+        std::string sym = rec.value("s", "UNKNOWN");
+        double ask_px = 0.0, ask_qty = 0.0;
+        double bid_px = 0.0, bid_qty = 0.0;
+
         if (rec.contains("a") && rec["a"].is_array() && !rec["a"].empty()) {
             const auto& a0 = rec["a"][0];
             if (a0.size() >= 2) {
-                double ask_px  = std::stod(a0[0].get<std::string>());
-                double ask_qty = std::stod(a0[1].get<std::string>());
-                std::cout << "   🔴 Ask: " << ask_px << " | Qty: " << ask_qty << std::endl;
+                ask_px  = std::stod(a0[0].get<std::string>());
+                ask_qty = std::stod(a0[1].get<std::string>());
             }
         }
+
         if (rec.contains("b") && rec["b"].is_array() && !rec["b"].empty()) {
             const auto& b0 = rec["b"][0];
             if (b0.size() >= 2) {
-                double bid_px  = std::stod(b0[0].get<std::string>());
-                double bid_qty = std::stod(b0[1].get<std::string>());
-                std::cout << "   🟢 Bid: " << bid_px << " | Qty: " << bid_qty << std::endl;
+                bid_px  = std::stod(b0[0].get<std::string>());
+                bid_qty = std::stod(b0[1].get<std::string>());
             }
         }
-    } catch (const std::exception& e) {
+
+        double mid_price = (ask_px > 0 && bid_px > 0)
+                         ? 0.5 * (ask_px + bid_px)
+                         : 0.0;
+
+        std::cout << std::fixed << std::setprecision(2);
+        std::cout << "   🟢 Bid: " << bid_px << " | Qty: " << bid_qty
+                  << "   🔴 Ask: " << ask_px << " | Qty: " << ask_qty << std::endl;
+
+        // ✅ Recorder integration (matches your Tick struct)
+		std::cout << "💡 [Bybit] sym=" << sym 
+          << " bid=" << bid_px << " ask=" << ask_px 
+          << " qtys=(" << bid_qty << "," << ask_qty << ") ts=" << ts << std::endl;
+
+		if (recorder_) 
+			std::cout << "💾 Recorder is attached, attempting DB insert...\n";
+		else 
+			std::cout << "⚠️ Recorder pointer is null!\n";
+        if (recorder_ && mid_price > 0.0) {
+            Tick tick;
+            tick.instrument = sym;
+            tick.price = mid_price;
+            tick.quantity = 0.5 * (bid_qty + ask_qty);
+            tick.type = TickType::ORDERBOOK_SNAPSHOT;
+            tick.timestamp_ns = static_cast<uint64_t>(ts) * 1'000'000; // ms → ns
+            tick.exchange_timestamp = tick.timestamp_ns;
+            tick.sequence = rec.value("u", 0ull);  // Bybit sequence field
+			std::cout << "🧩 [DEBUG] Inserting tick into recorder: "
+          << tick.instrument << " mid=" << mid_price
+          << " qty=" << tick.quantity << std::endl;
+			recorder_->start_recording();
+            recorder_->record(tick, mid_price, false);
+			std::cout << "✅ [DEBUG] record() call completed." << std::endl;
+        }
+    }
+    catch (const std::exception& e) {
         std::cerr << "❌ [Bybit parse_orderbook_object] " << e.what() << std::endl;
     }
 }
+
