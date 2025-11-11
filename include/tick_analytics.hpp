@@ -7,6 +7,7 @@
 #include <iostream>
 #include <nlohmann/json.hpp>
 #include "market_data_recorder.hpp"
+#include "indicators_state.hpp"
 
 #ifdef ZMQ_BUILD
 #include <zmq.hpp>
@@ -37,7 +38,7 @@ public:
     double calculate_vwap(const std::vector<Tick>& ticks) const;
     bool is_large_trade(const Tick& tick, double threshold_multiplier = 5.0) const;
     void add_tick(const Tick& tick);
-
+	std::unordered_map<std::string, IndicatorState> states_;
 #ifdef ZMQ_BUILD
     // === Asynchronous ZeroMQ Worker (Module C) ===
     void start_pull_server(const std::string& address, const Config& cfg);

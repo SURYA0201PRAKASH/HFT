@@ -5,6 +5,7 @@
 #include <sstream>
 #include <cmath>  // for std::isnan, std::isinf
 #include <filesystem>
+#include "indicators_state.hpp"
 
 static double safe_value(double v) {
     return (std::isnan(v) || std::isinf(v)) ? 0.0 : v;
@@ -60,16 +61,25 @@ MarketDataRecorder::MarketDataRecorder(const Config& cfg) {
 
         // ✅ Ensure table exists
         const char* create_sql = R"SQL(
-            CREATE TABLE IF NOT EXISTS ticks_live (
-                timestamp_ms INTEGER,
-                instrument TEXT,
-                trade_price REAL,
-                trade_qty REAL,
-                rolling_vol REAL,
-                is_large INTEGER
-            );
-        )SQL";
-
+		CREATE TABLE IF NOT EXISTS ticks_live (
+			timestamp_ms INTEGER,
+    		instrument   TEXT,
+    		trade_price  REAL,
+    		trade_qty    REAL,
+    		mid_price    REAL,
+    		spread       REAL,
+    		ema12        REAL,
+    		ema26        REAL,
+    		macd         REAL,
+    		rsi14        REAL,
+    		bb_mid       REAL,
+    		bb_up        REAL,
+    		bb_low       REAL,
+    		vwap         REAL,
+    		rolling_vol  REAL,
+    		is_large     INTEGER
+		);
+		)SQL";
         sqlite3_exec(db_, create_sql, nullptr, nullptr, nullptr);
         std::cout << "📀 SQLite database ready (WAL mode enabled) → " << db_path << "\n";
     }
@@ -155,5 +165,28 @@ void MarketDataRecorder::record(const Tick& tick, double vol, bool large) {
             std::cerr << "❌ SQLite insert error: " << sqlite3_errmsg(db_) << std::endl;
         }
     }
+}
+void MarketDataRecorder::record_with_indicators(
+    const Tick& t, double vol, bool large, const Indicators& I)
+{
+    if (!recording_ || !db_) return;
+    std::lock_guard<std::mutex> lock(file_mutex_);
+    auto ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::system_clock::now().time_since_epoch()).count();
+
+    auto safe = [](double v){ return (std::isnan(v)||std::isinf(v))?0.0:v; };
+
+    std::ostringstream sql;
+    sql << "INSERT INTO ticks_live VALUES("
+        << ts << ", '" << t.instrument << "', "
+        << safe(t.price) << ", " << safe(t.quantity) << ", "
+        << safe(I.mid) << ", " << safe(I.spread) << ", "
+        << safe(I.ema12) << ", " << safe(I.ema26) << ", "
+        << safe(I.macd) << ", " << safe(I.rsi14) << ", "
+        << safe(I.bb_mid) << ", " << safe(I.bb_up) << ", " << safe(I.bb_low) << ", "
+        << safe(I.vwap) << ", " << safe(vol) << ", " << (large ? 1 : 0) << ");";
+
+    if (sqlite3_exec(db_, sql.str().c_str(), nullptr, nullptr, nullptr) != SQLITE_OK)
+        std::cerr << "SQLite error: " << sqlite3_errmsg(db_) << std::endl;
 }
 

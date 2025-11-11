@@ -3,6 +3,8 @@
 #include <iostream>
 #include <iomanip>
 #include <sstream>
+#include "tick_analytics.hpp"
+#include "indicators_state.hpp"
 
 
 BybitWsClient::BybitWsClient(net::io_context& ioc, ssl::context& ctx)
@@ -22,7 +24,7 @@ BybitWsClient::BybitWsClient(net::io_context& ioc, ssl::context& ctx)
 // Subscribe (initial + reconnect)
 // =============================
 void BybitWsClient::subscribe() {
-    std::string sub = R"({"op":"subscribe","args":["orderbook.1.BTCUSDT"]})";
+    std::string sub = R"({"op":"subscribe","args":["orderbook.50.BTCUSDT"]})";
     std::cout << "📡 [BybitWsClient::subscribe] Sending subscription: " << sub << std::endl;
     send_text(sub);
 }
@@ -180,8 +182,30 @@ void BybitWsClient::parse_orderbook_object(const nlohmann::json& rec, long long 
 			std::cout << "🧩 [DEBUG] Inserting tick into recorder: "
           << tick.instrument << " mid=" << mid_price
           << " qty=" << tick.quantity << std::endl;
+			//recorder_->start_recording();
+            //recorder_->record(tick, mid_price, false);
+			// --- Add local static analytics (persist across ticks) ---
+			static TickAnalytics analytics;
+			static std::unordered_map<std::string, IndicatorState> states;
+
+			// --- Feed tick into analytics ---
+			analytics.add_tick(tick);
+
+			// --- Compute rolling volatility and trade size check ---
+			double rolling_vol = analytics.calculate_volatility(100);
+			bool is_large = analytics.is_large_trade(tick);
+
+			// --- Compute mid-price indicators ---
+			double mid = mid_price > 0 ? mid_price : tick.price;
+			Indicators ind = update_indicators(states[tick.instrument], mid, tick.price, tick.quantity);
+
+			// --- Save everything to DB (like Deribit) ---
 			recorder_->start_recording();
-            recorder_->record(tick, mid_price, false);
+			recorder_->record_with_indicators(tick, rolling_vol, is_large, ind);
+			std::cout << "✅ [Bybit Recorder] Full indicators recorded for " 
+          << tick.instrument << " | mid=" << mid 
+          << " | MACD=" << ind.macd << " | RSI=" << ind.rsi14 
+          << std::endl;
 			std::cout << "✅ [DEBUG] record() call completed." << std::endl;
         }
     }

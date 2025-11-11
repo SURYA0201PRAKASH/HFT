@@ -69,15 +69,16 @@ TickAnalytics::~TickAnalytics() {
 }
 
 void TickAnalytics::start_pull_server(const std::string& address, const Config& cfg) {
-	std::filesystem::create_directories("../data");
-	recorder_ = std::make_unique<MarketDataRecorder>(cfg);
-	std::cout << "🧩 Recorder created, writing to "
-          << cfg.recording.sqlite_path << std::endl;
-	recorder_->start_recording();
+    std::filesystem::create_directories("../data");
+    recorder_ = std::make_unique<MarketDataRecorder>(cfg);
+    std::cout << "🧩 Recorder created, writing to "
+              << cfg.recording.sqlite_path << std::endl;
+    recorder_->start_recording();
+
     try {
         // ✅ Bind a ZeroMQ PULL socket to receive ticks from TickProcessor
         zmq_pull_.bind(address);
-        // std::cout << "📊 [TickAnalytics] Listening for analytics ticks on " << address << std::endl;
+        std::cout << "📊 [TickAnalytics] Listening for analytics ticks on " << address << std::endl;
     } catch (const zmq::error_t& e) {
         std::cerr << "❌ [TickAnalytics] Failed to bind: " << e.what() << std::endl;
         return;
@@ -96,28 +97,32 @@ void TickAnalytics::start_pull_server(const std::string& address, const Config& 
                 std::string payload(static_cast<char*>(msg.data()), msg.size());
                 auto j = nlohmann::json::parse(payload);
 
-                // ✅ Convert JSON to Tick (requires Tick::from_json to be implemented)
+                // ✅ Convert JSON to Tick
                 Tick tick = Tick::from_json(j);
-				/*std::cout << "🟢 [TickAnalytics] Received: "
-				<< tick.instrument
-                << " | type=" << static_cast<int>(tick.type)
-                << " | price=" << tick.price
-                << " | qty=" << tick.quantity
-                << std::endl;*/
                 add_tick(tick);
 
-                // 🧮 Compute analytics in real-time
-                double vol = calculate_volatility(100);
-                bool large = is_large_trade(tick);
-				// 📝 Record to CSV/SQLite
-				if (recorder_){
-				recorder_->record(tick, vol, large);} //23rd Oct 2025
-                /*std::cout << "📈 [TickAnalytics] "
+                // --- Compute derived analytics ---
+                double mid = tick.price;                // If you don't have bid/ask, mid = price
+                double rolling_vol = calculate_volatility(100);
+                bool is_large = is_large_trade(tick);
+
+                // --- Compute indicator set ---
+                Indicators ind = update_indicators(states_[tick.instrument],
+                                                   mid, tick.price, tick.quantity);
+
+                // --- Record everything ---
+                if (recorder_) {
+                    recorder_->record_with_indicators(tick, rolling_vol, is_large, ind);
+                }
+
+                /* Optional debug output
+                std::cout << "📈 [TickAnalytics] "
                           << tick.instrument
                           << " price=" << tick.price
-                          << " vol=" << vol
-                          << (large ? " ⚠️ LARGE TRADE" : "")
-                          << std::endl;*/
+                          << " vol=" << rolling_vol
+                          << (is_large ? " ⚠️ LARGE TRADE" : "")
+                          << std::endl;
+                */
 
             } catch (const std::exception& e) {
                 std::cerr << "❌ [TickAnalytics] Error: " << e.what() << std::endl;
@@ -127,8 +132,9 @@ void TickAnalytics::start_pull_server(const std::string& address, const Config& 
         // 🧹 Clean shutdown
         zmq_pull_.close();
         zmq_ctx_.close();
-    });
+    });  // ✅ closes lambda properly
 }
+
 
 void TickAnalytics::stop() {
     running_ = false;
