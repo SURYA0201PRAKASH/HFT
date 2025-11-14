@@ -8,6 +8,10 @@
 #include <nlohmann/json.hpp>
 using json = nlohmann::json;
 #endif
+#include "l1_cache.hpp"
+
+// Define global L1 cache here
+std::unordered_map<std::string, L1Cache> g_l1;
 
 EnhancedDeribitClient::EnhancedDeribitClient(boost::asio::io_context& ioc,
                                            ssl::context& ctx,

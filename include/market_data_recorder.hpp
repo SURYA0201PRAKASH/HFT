@@ -28,4 +28,6 @@ private:
     std::atomic<bool> recording_{false};
     std::mutex file_mutex_;
 	sqlite3* db_ = nullptr;
+	std::string exchange_;     // "deribit" or "bybit"
+    std::string sqlite_path_;  // resolved DB path
 };
