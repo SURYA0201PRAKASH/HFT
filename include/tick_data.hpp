@@ -20,7 +20,7 @@ struct Tick {
     uint64_t timestamp_ns;
     uint64_t exchange_timestamp;
     TickType type;  // Now using enum class
-    
+
     std::string instrument;
     double price;
     double quantity;
@@ -29,10 +29,24 @@ struct Tick {
     uint64_t sequence;
     std::string channel;
     uint64_t enqueue_time_ns;
+
+    // === L1 fields (required for Deribit + Bybit unified processing) ===
+    double best_bid   = 0.0;
+    double best_ask   = 0.0;
+    double bid_vol_1  = 0.0;
+    double ask_vol_1  = 0.0;
+    double mid_price  = 0.0;
+
     // FIXED constructor - use default TRADE type
-    Tick() : timestamp_ns(0), exchange_timestamp(0), 
-             type(TickType::TRADE),  // Use enum value
-             price(0.0), quantity(0.0), sequence(0) {}
+    Tick()
+        : timestamp_ns(0),
+          exchange_timestamp(0),
+          type(TickType::TRADE),
+          price(0.0),
+          quantity(0.0),
+          sequence(0),
+          enqueue_time_ns(0) {}
+
     // === JSON Serialization for ZeroMQ transfer ===
     nlohmann::json to_json() const {
         return {
@@ -46,7 +60,12 @@ struct Tick {
             {"trade_id", trade_id},
             {"sequence", sequence},
             {"channel", channel},
-            {"enqueue_time_ns", enqueue_time_ns}
+            {"enqueue_time_ns", enqueue_time_ns},
+            {"best_bid", best_bid},
+            {"best_ask", best_ask},
+            {"bid_vol_1", bid_vol_1},
+            {"ask_vol_1", ask_vol_1},
+            {"mid_price", mid_price}
         };
     }
 
@@ -63,9 +82,17 @@ struct Tick {
         t.sequence = j.value("sequence", 0ull);
         t.channel = j.value("channel", "");
         t.enqueue_time_ns = j.value("enqueue_time_ns", 0ull);
+
+        t.best_bid  = j.value("best_bid", 0.0);
+        t.best_ask  = j.value("best_ask", 0.0);
+        t.bid_vol_1 = j.value("bid_vol_1", 0.0);
+        t.ask_vol_1 = j.value("ask_vol_1", 0.0);
+        t.mid_price = j.value("mid_price", 0.0);
+
         return t;
     }
 };
+
 class TickBuffer {
 private:
     std::vector<Tick> buffer_;
