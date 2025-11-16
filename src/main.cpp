@@ -56,10 +56,6 @@ void signal_handler(int signal) {
     exit(signal);
 }
 
-
-
-// Enhanced status display with tick statistics
-// Enhanced status display with tick statistics
 // Enhanced status display with tick statistics
 void print_status_and_books() {
     static int empty_count = 0;
@@ -127,7 +123,6 @@ void print_status_and_books() {
 
     std::cout << "📊 Status thread stopped gracefully.\n";
 }
-
 
 void launch_deribit(const Config& cfg) {
     std::string client_id     = "ykCxoRwu";
@@ -200,8 +195,6 @@ void launch_deribit(const Config& cfg) {
     std::cout << "✅ Deribit client stopped cleanly.\n";
 }
 
-
-
 void launch_bybit(const Config& cfg) {
     boost::asio::io_context ioc;
     ssl::context ctx(ssl::context::tlsv12_client);
@@ -214,11 +207,13 @@ void launch_bybit(const Config& cfg) {
     // --- Create Bybit WS client ---
     auto bybit_client = std::make_shared<BybitWsClient>(ioc, ctx);
     bybit_client->set_recorder(recorder);  // attach the recorder
-	std::cout << "🧠 Recorder attached to Bybit client @ " << bybit_client.get()
-          << " (recorder=" << recorder.get() << ")" << std::endl;
+    std::cout << "🧠 Recorder attached to Bybit client @ " << bybit_client.get()
+              << " (recorder=" << recorder.get() << ")" << std::endl;
+
     // --- Subscribe all configured symbols ---
     for (const auto& sym : cfg.symbols) {
-        bybit_client->subscribe();  // (later we can use sym dynamically)
+        (void)sym;  // currently unused, topic is hardcoded inside subscribe()
+        bybit_client->subscribe();
     }
 
     // --- Start connection & event loop ---
@@ -226,33 +221,59 @@ void launch_bybit(const Config& cfg) {
     ioc.run();
 }
 
-
-
 int main(int argc, char* argv[]) {
-    std::signal(SIGINT, signal_handler);
+    std::signal(SIGINT,  signal_handler);
     std::signal(SIGTERM, signal_handler);
 
-    std::string config_path = "configs/base_deribit.yaml";
+    // Modes:
+    //   ./hft_prototype deribit  → only Deribit
+    //   ./hft_prototype bybit    → only Bybit
+    //   ./hft_prototype both     → Deribit + Bybit in parallel
+    std::string mode = "deribit";
     if (argc > 1) {
-        std::string arg = argv[1];
-        if (arg == "bybit")
-            config_path = "configs/base_bybit.yaml";
-        else if (arg != "deribit") {
-            std::cerr << "❌ Unknown exchange: " << arg
-                      << " (use 'deribit' or 'bybit')\n";
-            return 1;
-        }
+        mode = argv[1];
     }
 
-    Config cfg = load_config(config_path);
-    std::cout << "🧭 Using configuration: " << config_path
-              << " | Exchange: " << cfg.exchange << std::endl;
-
     try {
-        if (cfg.exchange == "deribit")
-            launch_deribit(cfg);
-        else if (cfg.exchange == "bybit")
-            launch_bybit(cfg);
+        if (mode == "deribit") {
+            Config deribit_cfg = load_config("configs/base_deribit.yaml");
+            std::cout << "🧭 Using configuration: configs/base_deribit.yaml"
+                      << " | Exchange: " << deribit_cfg.exchange << std::endl;
+            launch_deribit(deribit_cfg);
+        }
+        else if (mode == "bybit") {
+            Config bybit_cfg = load_config("configs/base_bybit.yaml");
+            std::cout << "🧭 Using configuration: configs/base_bybit.yaml"
+                      << " | Exchange: " << bybit_cfg.exchange << std::endl;
+            launch_bybit(bybit_cfg);
+        }
+        else if (mode == "both") {
+            Config deribit_cfg = load_config("configs/base_deribit.yaml");
+            Config bybit_cfg   = load_config("configs/base_bybit.yaml");
+
+            std::cout << "🧭 Starting BOTH exchanges in parallel:\n"
+                      << "   - Deribit config: configs/base_deribit.yaml ("
+                      << deribit_cfg.exchange << ")\n"
+                      << "   - Bybit   config: configs/base_bybit.yaml ("
+                      << bybit_cfg.exchange << ")\n";
+
+            // Run Deribit + Bybit in two threads
+            std::thread deribit_thread([&](){
+                launch_deribit(deribit_cfg);
+            });
+
+            std::thread bybit_thread([&](){
+                launch_bybit(bybit_cfg);
+            });
+
+            deribit_thread.join();
+            bybit_thread.join();
+        }
+        else {
+            std::cerr << "❌ Unknown mode: " << mode
+                      << " (use 'deribit', 'bybit', or 'both')" << std::endl;
+            return 1;
+        }
     }
     catch (const std::exception& e) {
         std::cerr << "Fatal error: " << e.what() << "\n";
