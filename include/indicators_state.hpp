@@ -38,7 +38,7 @@ struct IndicatorState {
     std::deque<double> bb_win;
     double sum=0, sumsq=0;
     long double cum_pv=0, cum_vol=0;
-
+	double last_mid = 0.0;
     static constexpr double k12=2.0/(12.0+1.0);
     static constexpr double k26=2.0/(26.0+1.0);
     static constexpr int bb_period=20;
@@ -150,13 +150,17 @@ inline Indicators update_indicators(IndicatorState& s,
     o.trend_label = (o.ema12 > o.ema26) ? 1 : -1;
 
     // ===== Tick-to-tick return placeholder =====
-    static double last_mid = mid;
-    double ret = std::log(mid / (last_mid + 1e-9));
-
+    if (!s.initialized) {
+    s.last_mid = mid;  // on first initialization, align it
+	}
+    double ret = 0.0;
+	if (s.last_mid > 0) {
+		ret = std::log(mid / (s.last_mid + 1e-9));
+	}
     o.return_1s = ret;
     o.realized_vol_1s = std::fabs(ret);
 
-    last_mid = mid;
+    s.last_mid = mid;
 
     // ===== Time features =====
     auto now = std::chrono::system_clock::now();
